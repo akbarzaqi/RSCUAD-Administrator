@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import { Poppins } from "next/font/google";
 import "./globals.css";
 
-export const runtime = 'edge';
-
 const poppins = Poppins({
   variable: "--font-sans",
   subsets: ["latin"],
