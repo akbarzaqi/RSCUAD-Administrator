@@ -221,7 +221,7 @@ function DashboardYear({ year, onBack }: { year: number; onBack: () => void }) {
       const pemData = pemRes.data || []
       const kategoriIds = kategoriRes.data?.map((k) => k.id) || []
 
-      let pengData: { kode: string | null; nama_item: string; jumlah: number; bukti_url: string | null; kategori_id: string }[] = []
+      let pengData: { kode: string | null; nama_item: string; jumlah: number; bukti_url: string | null; kategori_id: string; tanggal: string | null }[] = []
       if (kategoriIds.length > 0) {
         const res = await supabase.from('pengeluaran').select('*').in('kategori_id', kategoriIds)
         pengData = res.data || []
