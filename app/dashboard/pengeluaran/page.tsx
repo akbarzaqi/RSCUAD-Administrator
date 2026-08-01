@@ -36,12 +36,13 @@ function rpShort(n: number) {
 }
 
 const emptyCatForm = { nama: '' }
-const emptyItemForm = { nama: '', satuan: 'Kali', unit: 1, harga: 0, kode: '' }
+const emptyItemForm = { nama: '', satuan: 'Kali', unit: 1, harga: 0, kode: '', tanggal: '' }
 
 export default function PengeluaranPage() {
   const { selectedYear, periodeId } = useYear()
   const supabase = createClient()
   const [kategori, setKategori] = useState<KategoriWithItems[]>([])
+  const [totalPemasukan, setTotalPemasukan] = useState(0)
   const [loading, setLoading] = useState(true)
 
   const [showCatModal, setShowCatModal] = useState(false)
@@ -60,11 +61,14 @@ export default function PengeluaranPage() {
     if (!periodeId) return
     setLoading(true)
 
-    const { data: kategoriRows } = await supabase
-      .from('kategori_pengeluaran')
-      .select('*')
-      .eq('periode_id', periodeId)
-      .order('urutan')
+    const [kategoriRes, pemasukanRes] = await Promise.all([
+      supabase.from('kategori_pengeluaran').select('*').eq('periode_id', periodeId).order('urutan'),
+      supabase.from('pemasukan').select('jumlah').eq('periode_id', periodeId),
+    ])
+
+    const kategoriRows = kategoriRes.data
+    const pemTotal = (pemasukanRes.data || []).reduce((s, r) => s + Number(r.jumlah), 0)
+    setTotalPemasukan(pemTotal)
 
     const kategoriList: KategoriWithItems[] = []
 
@@ -154,6 +158,7 @@ export default function PengeluaranPage() {
       unit: Number(item.qty),
       harga: Number(item.harga_satuan),
       kode: item.kode || '',
+      tanggal: item.tanggal || '',
     })
     setBuktiPreview(item.bukti_url || null)
     setBuktiFile(null)
@@ -183,7 +188,7 @@ export default function PengeluaranPage() {
   }
 
   const handleSaveItem = async () => {
-    if (!itemForm.nama) return
+    if (!itemForm.nama || !itemForm.tanggal) return
     setSaving(true)
 
     let buktiUrl: string | null = editingItemId ? (buktiPreview?.startsWith('http') ? buktiPreview : null) : null
@@ -211,6 +216,7 @@ export default function PengeluaranPage() {
       harga_satuan: harga,
       jumlah,
       bukti_url: buktiUrl || null,
+      tanggal: itemForm.tanggal,
     }
 
     if (editingItemId) {
@@ -232,11 +238,6 @@ export default function PengeluaranPage() {
     await supabase.from('pengeluaran').delete().eq('id', id)
     fetchData()
   }
-
-  const totalAnggaran = kategori.reduce(
-    (s, k) => s + k.items.reduce((ss, r) => ss + Number(r.jumlah), 0),
-    0,
-  )
 
   if (loading) {
     return (
@@ -276,7 +277,7 @@ export default function PengeluaranPage() {
             <Wallet className="size-4 text-zinc-400" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold tracking-tight text-emerald-600">{rp(grandTotal)}</p>
+            <p className="text-2xl font-semibold tracking-tight text-red-600">{rp(grandTotal)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -285,7 +286,7 @@ export default function PengeluaranPage() {
             <PiggyBank className="size-4 text-zinc-400" />
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-semibold tracking-tight text-emerald-600">{rp(totalAnggaran - grandTotal)}</p>
+            <p className="text-2xl font-semibold tracking-tight text-emerald-600">{rp(totalPemasukan - grandTotal)}</p>
           </CardContent>
         </Card>
       </div>
@@ -319,6 +320,7 @@ export default function PengeluaranPage() {
                     <tr>
                       <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-8">NO</th>
                       <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-left font-bold text-zinc-700">AKUN</th>
+                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-28">TANGGAL</th>
                       <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-16">SATUAN</th>
                       <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12">UNIT</th>
                       <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28">HARGA</th>
@@ -332,6 +334,11 @@ export default function PengeluaranPage() {
                       <tr key={r.id}>
                         <td className="border border-zinc-400 px-3 py-1.5 text-center tabular-nums text-zinc-700">{itemIdx + 1}</td>
                         <td className="border border-zinc-400 px-3 py-1.5 text-zinc-700">{r.nama_item}</td>
+                        <td className="border border-zinc-400 px-3 py-1.5 text-center whitespace-nowrap text-zinc-600">
+                          {r.tanggal
+                            ? new Date(r.tanggal).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : '-'}
+                        </td>
                         <td className="border border-zinc-400 px-3 py-1.5 text-center text-zinc-700">{r.satuan}</td>
                         <td className="border border-zinc-400 px-3 py-1.5 text-center tabular-nums text-zinc-700">{Number(r.qty)}</td>
                         <td className="border border-zinc-400 px-3 py-1.5 text-right tabular-nums text-zinc-700">{rpShort(Number(r.harga_satuan))}</td>
@@ -350,7 +357,7 @@ export default function PengeluaranPage() {
                       </tr>
                     ))}
                     <tr className="bg-orange-50/60 font-bold">
-                      <td colSpan={5} className="border border-zinc-400 px-3 py-2 text-right text-orange-800">Total {kat.nama_kategori}</td>
+                      <td colSpan={6} className="border border-zinc-400 px-3 py-2 text-right text-orange-800">Total {kat.nama_kategori}</td>
                       <td className="border border-zinc-400 px-3 py-2 text-right tabular-nums text-orange-700">{rp(totalKat)}</td>
                       <td className="border border-zinc-400 px-3 py-2"></td>
                       <td className="border border-zinc-400 px-3 py-2"></td>
@@ -431,10 +438,16 @@ export default function PengeluaranPage() {
                     className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-600">Nama Item</label>
-                  <input type="text" value={itemForm.nama} onChange={(e) => setItemForm({ ...itemForm, nama: e.target.value })} placeholder="contoh: Servo Motor"
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Tanggal</label>
+                  <input type="date" value={itemForm.tanggal} onChange={(e) => setItemForm({ ...itemForm, tanggal: e.target.value })}
                     className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20" />
                 </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-zinc-600">Nama Item</label>
+                <input type="text" value={itemForm.nama} onChange={(e) => setItemForm({ ...itemForm, nama: e.target.value })} placeholder="contoh: Servo Motor"
+                  className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20" />
               </div>
 
               <div className="grid grid-cols-3 gap-4">
@@ -502,7 +515,7 @@ export default function PengeluaranPage() {
             </div>
             <div className="mt-6 flex items-center justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setShowItemModal(false)}>Batal</Button>
-              <Button size="sm" onClick={handleSaveItem} disabled={!itemForm.nama || saving}>
+              <Button size="sm" onClick={handleSaveItem} disabled={!itemForm.nama || !itemForm.tanggal || saving}>
                 {saving ? 'Menyimpan...' : editingItemId ? 'Simpan Perubahan' : 'Tambah Item'}
               </Button>
             </div>

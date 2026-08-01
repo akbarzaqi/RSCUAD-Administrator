@@ -121,6 +121,7 @@ export interface Database {
           harga_satuan: number
           jumlah: number
           bukti_url: string | null
+          tanggal: string | null
         }
         Insert: {
           id?: string
@@ -132,6 +133,7 @@ export interface Database {
           harga_satuan?: number
           jumlah?: number
           bukti_url?: string | null
+          tanggal?: string | null
         }
         Update: {
           id?: string
@@ -143,6 +145,7 @@ export interface Database {
           harga_satuan?: number
           jumlah?: number
           bukti_url?: string | null
+          tanggal?: string | null
         }
       }
     }

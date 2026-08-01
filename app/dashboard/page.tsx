@@ -246,7 +246,7 @@ function DashboardYear({ year, onBack }: { year: number; onBack: () => void }) {
       }))
       const pengeluaranTx = pengData.map((r) => ({
         kode: r.kode || '-',
-        tanggal: '',
+        tanggal: r.tanggal || '',
         deskripsi: r.nama_item,
         nominal: -Number(r.jumlah),
         hasBukti: !!r.bukti_url,

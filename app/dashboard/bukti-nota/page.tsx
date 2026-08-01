@@ -106,7 +106,7 @@ export default function BuktiNotaPage() {
       namaItem: r.nama_item,
       asal: 'Pengeluaran' as const,
       kategori: kategoriMap.get(r.kategori_id) || undefined,
-      tanggal: null,
+      tanggal: r.tanggal || null,
       jumlah: Number(r.jumlah),
       bukti_url: r.bukti_url,
     }))
