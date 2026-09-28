@@ -24,6 +24,9 @@ import {
   Printer,
   X,
   Image as ImageIcon,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react'
 
 type KategoriRow = Database['public']['Tables']['kategori_pengeluaran']['Row']
@@ -31,6 +34,8 @@ type PengeluaranRow = Database['public']['Tables']['pengeluaran']['Row']
 type PemasukanRow = Database['public']['Tables']['pemasukan']['Row']
 
 type KategoriWithItems = KategoriRow & { items: PengeluaranRow[] }
+type BuktiStatusItem = { key: string; kode: string; terupload: boolean; bukti_url: string | null; namaItem: string }
+type SortKey = 'kode' | 'nama' | 'satuan' | 'qty' | 'harga' | 'jumlah'
 
 function rp(n: number) {
   return new Intl.NumberFormat('id-ID', {
@@ -48,9 +53,12 @@ function rpShort(n: number) {
 export default function LaporanPage() {
   const { selectedYear, selectedPeriode, periodeId } = useYear()
   const supabase = createClient()
+
   const [pemasukanData, setPemasukanData] = useState<PemasukanRow[]>([])
   const [kategori, setKategori] = useState<KategoriWithItems[]>([])
-  const [buktiStatus, setBuktiStatus] = useState<{ kode: string; terupload: boolean; bukti_url: string | null; namaItem: string }[]>([])
+  const [buktiStatus, setBuktiStatus] = useState<BuktiStatusItem[]>([])
+  const [pemSort, setPemSort] = useState<{ key: SortKey; asc: boolean }>({ key: 'kode', asc: true })
+  const [pengSort, setPengSort] = useState<{ key: SortKey; asc: boolean }>({ key: 'kode', asc: true })
   const [loading, setLoading] = useState(true)
   const [isLocked, setIsLocked] = useState(false)
   const [showLockConfirm, setShowLockConfirm] = useState(false)
@@ -62,29 +70,59 @@ export default function LaporanPage() {
     setLoading(true)
 
     const [pemRes, kategoriRes] = await Promise.all([
-      supabase.from('pemasukan').select('*').eq('periode_id', periodeId).order('kode'),
+      supabase.from('pemasukan').select('*').eq('periode_id', periodeId),
       supabase.from('kategori_pengeluaran').select('*').eq('periode_id', periodeId).order('urutan'),
     ])
 
-    const pemData = pemRes.data || []
+    const pemData = (pemRes.data || []).sort((a, b) =>
+      (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+    )
     setPemasukanData(pemData)
 
     const kategoriList: KategoriWithItems[] = []
-    const kategoriIds = kategoriRes.data?.map((k) => k.id) || []
 
     for (const k of kategoriRes.data || []) {
-      const { data: items } = await supabase.from('pengeluaran').select('*').eq('kategori_id', k.id).order('kode')
-      kategoriList.push({ ...k, items: items || [] })
+      const { data: items } = await supabase.from('pengeluaran').select('*').eq('kategori_id', k.id)
+      const sortedItems = (items || []).sort((a, b) =>
+        (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+      )
+      kategoriList.push({ ...k, items: sortedItems })
     }
 
     setKategori(kategoriList)
 
-    const buktiItems = [
-      ...pemData.map((r) => ({ kode: r.kode || '-', terupload: !!r.bukti_url, bukti_url: r.bukti_url, namaItem: r.nama_akun })),
+    // Kelompokkan bukti nota per kode nota (satu nota bisa memiliki beberapa item dengan kode yang sama)
+    const rawBukti = [
+      ...pemData.map((r) => ({ id: r.id, kode: r.kode || '-', terupload: !!r.bukti_url, bukti_url: r.bukti_url, namaItem: r.nama_akun })),
       ...kategoriList.flatMap((k) =>
-        k.items.map((r) => ({ kode: r.kode || '-', terupload: !!r.bukti_url, bukti_url: r.bukti_url, namaItem: r.nama_item }))
+        k.items.map((r) => ({ id: r.id, kode: r.kode || '-', terupload: !!r.bukti_url, bukti_url: r.bukti_url, namaItem: r.nama_item }))
       ),
     ]
+
+    const notaMap = new Map<string, BuktiStatusItem>()
+    for (const item of rawBukti) {
+      const key = item.kode && item.kode !== '-' ? item.kode : item.id
+      if (notaMap.has(key)) {
+        const existing = notaMap.get(key)!
+        existing.namaItem += `, ${item.namaItem}`
+        if (!existing.terupload && item.terupload) {
+          existing.terupload = true
+          existing.bukti_url = item.bukti_url
+        }
+      } else {
+        notaMap.set(key, {
+          key,
+          kode: item.kode,
+          terupload: item.terupload,
+          bukti_url: item.bukti_url,
+          namaItem: item.namaItem,
+        })
+      }
+    }
+
+    const buktiItems = Array.from(notaMap.values()).sort((a, b) =>
+      a.kode.localeCompare(b.kode, undefined, { numeric: true, sensitivity: 'base' })
+    )
     setBuktiStatus(buktiItems)
 
     if (selectedPeriode) {
@@ -109,6 +147,68 @@ export default function LaporanPage() {
   const buktiTotal = buktiStatus.length
   const buktiMissing = buktiTotal - buktiTerupload
 
+  const togglePemSort = (key: SortKey) => {
+    setPemSort((prev) => ({ key, asc: prev.key === key ? !prev.asc : true }))
+  }
+
+  const togglePengSort = (key: SortKey) => {
+    setPengSort((prev) => ({ key, asc: prev.key === key ? !prev.asc : true }))
+  }
+
+  const getSortedPemasukan = () => {
+    return [...pemasukanData].sort((a, b) => {
+      let cmp = 0
+      switch (pemSort.key) {
+        case 'kode':
+          cmp = (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+          break
+        case 'nama':
+          cmp = a.nama_akun.localeCompare(b.nama_akun)
+          break
+        case 'satuan':
+          cmp = (a.satuan || '').localeCompare(b.satuan || '')
+          break
+        case 'qty':
+          cmp = Number(a.qty) - Number(b.qty)
+          break
+        case 'harga':
+          cmp = Number(a.harga_satuan) - Number(b.harga_satuan)
+          break
+        case 'jumlah':
+          cmp = Number(a.jumlah) - Number(b.jumlah)
+          break
+      }
+      return pemSort.asc ? cmp : -cmp
+    })
+  }
+
+  const getSortedPengeluaran = (items: PengeluaranRow[]) => {
+    return [...items].sort((a, b) => {
+      let cmp = 0
+      switch (pengSort.key) {
+        case 'kode':
+          cmp = (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+          break
+        case 'nama':
+          cmp = a.nama_item.localeCompare(b.nama_item)
+          break
+        case 'satuan':
+          cmp = (a.satuan || '').localeCompare(b.satuan || '')
+          break
+        case 'qty':
+          cmp = Number(a.qty) - Number(b.qty)
+          break
+        case 'harga':
+          cmp = Number(a.harga_satuan) - Number(b.harga_satuan)
+          break
+        case 'jumlah':
+          cmp = Number(a.jumlah) - Number(b.jumlah)
+          break
+      }
+      return pengSort.asc ? cmp : -cmp
+    })
+  }
+
   const handleLock = async () => {
     if (!periodeId) return
     if (showLockConfirm) {
@@ -128,38 +228,133 @@ export default function LaporanPage() {
 
   function exportToExcel() {
     const wb = XLSX.utils.book_new()
+    const orgName = selectedPeriode?.nama_organisasi || 'R-SCUAD'
     const header = [
       ['Lampiran II'],
       ['REALISASI ANGGARAN DANA'],
+      [orgName.toUpperCase()],
       ['KRSBI HUMANOID'],
       [`TAHUN ${selectedYear}`],
       [''],
     ]
 
+    const colWidths = [
+      { wch: 5 },
+      { wch: 32 },
+      { wch: 10 },
+      { wch: 8 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 8 },
+    ]
+
+    const sortedPem = getSortedPemasukan()
+
+    // Sheet 1: Laporan Realisasi Lengkap (Pemasukan + Semua Kategori Pengeluaran + Rekapitulasi)
+    const laporanLengkap: (string | number)[][] = [
+      ...header,
+      ['A. PEMASUKAN'],
+      [''],
+      ['NO', 'AKUN', 'SATUAN', 'UNIT', 'HARGA', 'JUMLAH', 'KODE'],
+      ...sortedPem.map((r, i) => [
+        i + 1,
+        r.nama_akun,
+        r.satuan || '',
+        Number(r.qty),
+        Number(r.harga_satuan),
+        Number(r.jumlah),
+        r.kode || '',
+      ]),
+      ['', '', '', '', 'Total Pemasukan', totalPemasukan, ''],
+      [''],
+      ['B. PENGELUARAN'],
+      [''],
+    ]
+
+    if (kategori.length === 0) {
+      laporanLengkap.push(['', '(Belum ada kategori pengeluaran)', '', '', '', 0, ''], [''])
+    } else {
+      for (const kat of kategori) {
+        const sortedKatItems = getSortedPengeluaran(kat.items)
+        const totalKat = kat.items.reduce((s, r) => s + Number(r.jumlah), 0)
+        laporanLengkap.push(
+          ['', kat.nama_kategori.toUpperCase()],
+          ['NO', 'AKUN', 'SATUAN', 'UNIT', 'HARGA', 'JUMLAH', 'KODE'],
+        )
+        if (sortedKatItems.length === 0) {
+          laporanLengkap.push(['', '(Belum ada transaksi)', '', '', '', 0, ''])
+        } else {
+          laporanLengkap.push(
+            ...sortedKatItems.map((r, i) => [
+              i + 1,
+              r.nama_item,
+              r.satuan || '',
+              Number(r.qty),
+              Number(r.harga_satuan),
+              Number(r.jumlah),
+              r.kode || '',
+            ])
+          )
+        }
+        laporanLengkap.push(
+          ['', '', '', '', `Total ${kat.nama_kategori}`, totalKat, ''],
+          [''],
+        )
+      }
+    }
+
+    laporanLengkap.push(
+      ['', '', '', '', 'TOTAL PENGELUARAN', totalPengeluaran, ''],
+      [''],
+      ['', 'REKAPITULASI', '', '', '', '', ''],
+      ['', 'Total Pemasukan', '', '', '', totalPemasukan, ''],
+      ['', 'Total Pengeluaran', '', '', '', totalPengeluaran, ''],
+      ['', 'Saldo Akhir', '', '', '', saldoAkhir, ''],
+    )
+
+    const sLengkap = XLSX.utils.aoa_to_sheet(laporanLengkap)
+    sLengkap['!cols'] = colWidths
+    XLSX.utils.book_append_sheet(wb, sLengkap, 'Laporan Realisasi')
+
+    // Sheet 2: Rincian Pemasukan
     const pemasukanExcel = [
       ...header,
       ['A. PEMASUKAN'],
       [''],
       ['NO', 'AKUN', 'SATUAN', 'UNIT', 'HARGA', 'JUMLAH', 'KODE'],
-      ...pemasukanData.map((r, i) => [
-        i + 1, r.nama_akun, r.satuan || '', Number(r.qty), Number(r.harga_satuan), Number(r.jumlah), r.kode || '',
+      ...sortedPem.map((r, i) => [
+        i + 1,
+        r.nama_akun,
+        r.satuan || '',
+        Number(r.qty),
+        Number(r.harga_satuan),
+        Number(r.jumlah),
+        r.kode || '',
       ]),
       ['', '', '', '', 'Total Pemasukan', totalPemasukan, ''],
     ]
     const ps = XLSX.utils.aoa_to_sheet(pemasukanExcel)
-    ps['!cols'] = [{ wch: 5 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 18 }, { wch: 18 }, { wch: 8 }]
+    ps['!cols'] = colWidths
     XLSX.utils.book_append_sheet(wb, ps, 'Pemasukan')
 
+    // Sheet 3: Rincian Pengeluaran
     let pengRow = 0
     const pengeluaranExcel: (string | number)[][] = [...header, ['B. PENGELUARAN'], ['']]
 
     for (const kat of kategori) {
+      const sortedKatItems = getSortedPengeluaran(kat.items)
       const totalKat = kat.items.reduce((s, r) => s + Number(r.jumlah), 0)
       pengeluaranExcel.push(
         ['', kat.nama_kategori.toUpperCase()],
         ['NO', 'AKUN', 'SATUAN', 'UNIT', 'HARGA', 'JUMLAH', 'KODE'],
-        ...kat.items.map((r) => [
-          ++pengRow, r.nama_item, r.satuan || '', Number(r.qty), Number(r.harga_satuan), Number(r.jumlah), r.kode || '',
+        ...sortedKatItems.map((r) => [
+          ++pengRow,
+          r.nama_item,
+          r.satuan || '',
+          Number(r.qty),
+          Number(r.harga_satuan),
+          Number(r.jumlah),
+          r.kode || '',
         ]),
         ['', '', '', '', `Total ${kat.nama_kategori}`, totalKat, ''],
         [''],
@@ -169,21 +364,8 @@ export default function LaporanPage() {
     pengeluaranExcel.push(['', '', '', '', 'TOTAL PENGELUARAN', totalPengeluaran, ''])
 
     const pe = XLSX.utils.aoa_to_sheet(pengeluaranExcel)
-    pe['!cols'] = [{ wch: 5 }, { wch: 28 }, { wch: 10 }, { wch: 8 }, { wch: 18 }, { wch: 18 }, { wch: 8 }]
+    pe['!cols'] = colWidths
     XLSX.utils.book_append_sheet(wb, pe, 'Pengeluaran')
-
-    const rekapData = [
-      ...header,
-      ['REKAPITULASI'],
-      [''],
-      ['KETERANGAN', 'JUMLAH'],
-      ['Total Pemasukan', totalPemasukan],
-      ['Total Pengeluaran', totalPengeluaran],
-      ['Saldo Akhir', saldoAkhir],
-    ]
-    const rekap = XLSX.utils.aoa_to_sheet(rekapData)
-    rekap['!cols'] = [{ wch: 25 }, { wch: 20 }]
-    XLSX.utils.book_append_sheet(wb, rekap, 'Rekap')
 
     XLSX.writeFile(wb, `Laporan_Realisasi_Anggaran_KRSBI_${selectedYear}.xlsx`)
   }
@@ -283,16 +465,88 @@ export default function LaporanPage() {
                 <thead>
                   <tr>
                     <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-8">NO</th>
-                    <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-left font-bold text-zinc-700">AKUN</th>
-                    <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-16">SATUAN</th>
-                    <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12">UNIT</th>
-                    <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28">HARGA</th>
-                    <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28">JUMLAH</th>
-                    <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12">KODE</th>
+                    <th
+                      className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-left font-bold text-zinc-700 cursor-pointer select-none hover:bg-zinc-300"
+                      onClick={() => togglePemSort('nama')}
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>AKUN</span>
+                        {pemSort.key === 'nama' ? (
+                          pemSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                        ) : (
+                          <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-16 cursor-pointer select-none hover:bg-zinc-300"
+                      onClick={() => togglePemSort('satuan')}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>SATUAN</span>
+                        {pemSort.key === 'satuan' ? (
+                          pemSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                        ) : (
+                          <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12 cursor-pointer select-none hover:bg-zinc-300"
+                      onClick={() => togglePemSort('qty')}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>UNIT</span>
+                        {pemSort.key === 'qty' ? (
+                          pemSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                        ) : (
+                          <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28 cursor-pointer select-none hover:bg-zinc-300"
+                      onClick={() => togglePemSort('harga')}
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>HARGA</span>
+                        {pemSort.key === 'harga' ? (
+                          pemSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                        ) : (
+                          <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28 cursor-pointer select-none hover:bg-zinc-300"
+                      onClick={() => togglePemSort('jumlah')}
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>JUMLAH</span>
+                        {pemSort.key === 'jumlah' ? (
+                          pemSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                        ) : (
+                          <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
+                    <th
+                      className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12 cursor-pointer select-none hover:bg-zinc-300"
+                      onClick={() => togglePemSort('kode')}
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>KODE</span>
+                        {pemSort.key === 'kode' ? (
+                          pemSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                        ) : (
+                          <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                        )}
+                      </div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {pemasukanData.map((r, i) => (
+                  {getSortedPemasukan().map((r, i) => (
                     <tr key={r.id}>
                       <td className="border border-zinc-400 px-3 py-1.5 text-center tabular-nums text-zinc-700">{i + 1}</td>
                       <td className="border border-zinc-400 px-3 py-1.5 text-zinc-700">{r.nama_akun}</td>
@@ -317,6 +571,7 @@ export default function LaporanPage() {
               <p className="text-sm font-bold uppercase tracking-wider text-zinc-800">B. Pengeluaran</p>
 
               {kategori.map((kat) => {
+                const sortedKatItems = getSortedPengeluaran(kat.items)
                 const totalKat = kat.items.reduce((s, r) => s + Number(r.jumlah), 0)
                 return (
                   <div key={kat.id} className="space-y-2">
@@ -329,16 +584,88 @@ export default function LaporanPage() {
                         </tr>
                         <tr>
                           <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-8">NO</th>
-                          <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-left font-bold text-zinc-700">AKUN</th>
-                          <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-16">SATUAN</th>
-                          <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12">UNIT</th>
-                          <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28">HARGA</th>
-                          <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28">JUMLAH</th>
-                          <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12">KODE</th>
+                          <th
+                            className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-left font-bold text-zinc-700 cursor-pointer select-none hover:bg-zinc-300"
+                            onClick={() => togglePengSort('nama')}
+                          >
+                            <div className="flex items-center gap-1">
+                              <span>AKUN</span>
+                              {pengSort.key === 'nama' ? (
+                                pengSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                              ) : (
+                                <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-16 cursor-pointer select-none hover:bg-zinc-300"
+                            onClick={() => togglePengSort('satuan')}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              <span>SATUAN</span>
+                              {pengSort.key === 'satuan' ? (
+                                pengSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                              ) : (
+                                <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12 cursor-pointer select-none hover:bg-zinc-300"
+                            onClick={() => togglePengSort('qty')}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              <span>UNIT</span>
+                              {pengSort.key === 'qty' ? (
+                                pengSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                              ) : (
+                                <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28 cursor-pointer select-none hover:bg-zinc-300"
+                            onClick={() => togglePengSort('harga')}
+                          >
+                            <div className="flex items-center justify-end gap-1">
+                              <span>HARGA</span>
+                              {pengSort.key === 'harga' ? (
+                                pengSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                              ) : (
+                                <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28 cursor-pointer select-none hover:bg-zinc-300"
+                            onClick={() => togglePengSort('jumlah')}
+                          >
+                            <div className="flex items-center justify-end gap-1">
+                              <span>JUMLAH</span>
+                              {pengSort.key === 'jumlah' ? (
+                                pengSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                              ) : (
+                                <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                              )}
+                            </div>
+                          </th>
+                          <th
+                            className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12 cursor-pointer select-none hover:bg-zinc-300"
+                            onClick={() => togglePengSort('kode')}
+                          >
+                            <div className="flex items-center justify-center gap-1">
+                              <span>KODE</span>
+                              {pengSort.key === 'kode' ? (
+                                pengSort.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                              ) : (
+                                <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                              )}
+                            </div>
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
-                        {kat.items.map((r, i) => (
+                        {sortedKatItems.map((r, i) => (
                           <tr key={r.id}>
                             <td className="border border-zinc-400 px-3 py-1.5 text-center tabular-nums text-zinc-700">{i + 1}</td>
                             <td className="border border-zinc-400 px-3 py-1.5 text-zinc-700">{r.nama_item}</td>
@@ -391,7 +718,7 @@ export default function LaporanPage() {
         <CardContent className="space-y-4">
           <div ref={printRef} className="grid grid-cols-6 gap-3 sm:grid-cols-8">
             {buktiStatus.map((item) => (
-              <div key={item.kode} className="flex flex-col items-center gap-1">
+              <div key={item.key} className="flex flex-col items-center gap-1">
                 {item.bukti_url ? (
                   <button
                     onClick={() => setPreviewBukti(item)}

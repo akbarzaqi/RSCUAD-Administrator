@@ -15,12 +15,16 @@ import {
   Trash2,
   X,
   Upload,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react'
 
 type KategoriRow = Database['public']['Tables']['kategori_pengeluaran']['Row']
 type PengeluaranRow = Database['public']['Tables']['pengeluaran']['Row']
 
 type KategoriWithItems = KategoriRow & { items: PengeluaranRow[] }
+type SortKey = 'no' | 'nama' | 'tanggal' | 'satuan' | 'unit' | 'harga' | 'jumlah' | 'kode'
 
 function rp(n: number) {
   return new Intl.NumberFormat('id-ID', {
@@ -44,6 +48,7 @@ export default function PengeluaranPage() {
   const [kategori, setKategori] = useState<KategoriWithItems[]>([])
   const [totalPemasukan, setTotalPemasukan] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; asc: boolean }>({ key: 'kode', asc: true })
 
   const [showCatModal, setShowCatModal] = useState(false)
   const [catForm, setCatForm] = useState(emptyCatForm)
@@ -77,9 +82,12 @@ export default function PengeluaranPage() {
         .from('pengeluaran')
         .select('*')
         .eq('kategori_id', k.id)
-        .order('kode')
 
-      kategoriList.push({ ...k, items: items || [] })
+      const sortedItems = (items || []).sort((a, b) =>
+        (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+      )
+
+      kategoriList.push({ ...k, items: sortedItems })
     }
 
     setKategori(kategoriList)
@@ -98,7 +106,50 @@ export default function PengeluaranPage() {
   const getNextKode = (catIndex: number) => {
     const prefix = String.fromCharCode(66 + catIndex)
     const catItems = kategori[catIndex]?.items || []
-    return `${prefix}${catItems.length + 1}`
+    let maxNum = 0
+    for (const item of catItems) {
+      if (item.kode && item.kode.startsWith(prefix)) {
+        const numPart = parseInt(item.kode.slice(prefix.length), 10)
+        if (!isNaN(numPart) && numPart > maxNum) {
+          maxNum = numPart
+        }
+      }
+    }
+    return `${prefix}${maxNum + 1}`
+  }
+
+  const toggleSort = (key: SortKey) => {
+    setSortConfig((prev) => ({ key, asc: prev.key === key ? !prev.asc : true }))
+  }
+
+  const getSortedItems = (items: PengeluaranRow[]) => {
+    return [...items].sort((a, b) => {
+      let cmp = 0
+      switch (sortConfig.key) {
+        case 'kode':
+          cmp = (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+          break
+        case 'nama':
+          cmp = (a.nama_item || '').localeCompare(b.nama_item || '')
+          break
+        case 'tanggal':
+          cmp = (a.tanggal || '').localeCompare(b.tanggal || '')
+          break
+        case 'satuan':
+          cmp = (a.satuan || '').localeCompare(b.satuan || '')
+          break
+        case 'unit':
+          cmp = Number(a.qty) - Number(b.qty)
+          break
+        case 'harga':
+          cmp = Number(a.harga_satuan) - Number(b.harga_satuan)
+          break
+        case 'jumlah':
+          cmp = Number(a.jumlah) - Number(b.jumlah)
+          break
+      }
+      return sortConfig.asc ? cmp : -cmp
+    })
   }
 
   const openAddCat = () => {
@@ -300,7 +351,7 @@ export default function PengeluaranPage() {
                 <table className="w-full border-collapse text-xs">
                   <thead>
                     <tr>
-                      <th colSpan={8} className="border border-zinc-400 bg-zinc-200 px-3 py-2">
+                      <th colSpan={9} className="border border-zinc-400 bg-zinc-200 px-3 py-2">
                         <div className="flex items-center justify-between">
                           <span className="font-bold uppercase tracking-wider text-zinc-700">{kat.nama_kategori}</span>
                           <div className="flex items-center gap-1">
@@ -319,18 +370,102 @@ export default function PengeluaranPage() {
                     </tr>
                     <tr>
                       <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-8">NO</th>
-                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-left font-bold text-zinc-700">AKUN</th>
-                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-28">TANGGAL</th>
-                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-16">SATUAN</th>
-                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12">UNIT</th>
-                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28">HARGA</th>
-                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28">JUMLAH</th>
-                      <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12">KODE</th>
+                      <th
+                        className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-left font-bold text-zinc-700 cursor-pointer select-none hover:bg-zinc-300"
+                        onClick={() => toggleSort('nama')}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span>AKUN</span>
+                          {sortConfig.key === 'nama' ? (
+                            sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                          ) : (
+                            <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-28 cursor-pointer select-none hover:bg-zinc-300"
+                        onClick={() => toggleSort('tanggal')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>TANGGAL</span>
+                          {sortConfig.key === 'tanggal' ? (
+                            sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                          ) : (
+                            <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-16 cursor-pointer select-none hover:bg-zinc-300"
+                        onClick={() => toggleSort('satuan')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>SATUAN</span>
+                          {sortConfig.key === 'satuan' ? (
+                            sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                          ) : (
+                            <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12 cursor-pointer select-none hover:bg-zinc-300"
+                        onClick={() => toggleSort('unit')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>UNIT</span>
+                          {sortConfig.key === 'unit' ? (
+                            sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                          ) : (
+                            <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28 cursor-pointer select-none hover:bg-zinc-300"
+                        onClick={() => toggleSort('harga')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <span>HARGA</span>
+                          {sortConfig.key === 'harga' ? (
+                            sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                          ) : (
+                            <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-right font-bold text-zinc-700 w-28 cursor-pointer select-none hover:bg-zinc-300"
+                        onClick={() => toggleSort('jumlah')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <span>JUMLAH</span>
+                          {sortConfig.key === 'jumlah' ? (
+                            sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                          ) : (
+                            <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-12 cursor-pointer select-none hover:bg-zinc-300"
+                        onClick={() => toggleSort('kode')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>KODE</span>
+                          {sortConfig.key === 'kode' ? (
+                            sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                          ) : (
+                            <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                          )}
+                        </div>
+                      </th>
                       <th className="border border-zinc-400 bg-zinc-200 px-3 py-2 text-center font-bold text-zinc-700 w-20">AKSI</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {kat.items.map((r, itemIdx) => (
+                    {getSortedItems(kat.items).map((r, itemIdx) => (
                       <tr key={r.id}>
                         <td className="border border-zinc-400 px-3 py-1.5 text-center tabular-nums text-zinc-700">{itemIdx + 1}</td>
                         <td className="border border-zinc-400 px-3 py-1.5 text-zinc-700">{r.nama_item}</td>
@@ -436,6 +571,7 @@ export default function PengeluaranPage() {
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Kode</label>
                   <input type="text" value={itemForm.kode} onChange={(e) => setItemForm({ ...itemForm, kode: e.target.value })} placeholder="B1"
                     className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20" />
+                  <p className="mt-1 text-[11px] text-zinc-500">Item dalam nota yang sama menggunakan kode yang sama.</p>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Tanggal</label>

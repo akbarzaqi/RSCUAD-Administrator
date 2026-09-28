@@ -20,6 +20,9 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react'
 
 type BuktiItem = {
@@ -32,6 +35,8 @@ type BuktiItem = {
   jumlah: number
   bukti_url: string | null
 }
+
+type SortKey = 'kode' | 'namaItem' | 'asal' | 'jumlah' | 'status'
 
 const emptyForm = {
   kode: '',
@@ -57,6 +62,7 @@ export default function BuktiNotaPage() {
   const [data, setData] = useState<BuktiItem[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; asc: boolean }>({ key: 'kode', asc: true })
 
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(emptyForm)
@@ -111,13 +117,21 @@ export default function BuktiNotaPage() {
       bukti_url: r.bukti_url,
     }))
 
-    setData([...pemItems, ...pengItems].sort((a, b) => a.kode.localeCompare(b.kode)))
+    setData(
+      [...pemItems, ...pengItems].sort((a, b) =>
+        (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+      )
+    )
     setLoading(false)
   }, [periodeId, supabase])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  const toggleSort = (key: SortKey) => {
+    setSortConfig((prev) => ({ key, asc: prev.key === key ? !prev.asc : true }))
+  }
 
   const filtered = data.filter((b) => {
     if (!search) return true
@@ -127,6 +141,28 @@ export default function BuktiNotaPage() {
       b.namaItem.toLowerCase().includes(q) ||
       b.kategori?.toLowerCase().includes(q)
     )
+  })
+
+  const sortedData = [...filtered].sort((a, b) => {
+    let cmp = 0
+    switch (sortConfig.key) {
+      case 'kode':
+        cmp = (a.kode || '').localeCompare(b.kode || '', undefined, { numeric: true, sensitivity: 'base' })
+        break
+      case 'namaItem':
+        cmp = (a.namaItem || '').localeCompare(b.namaItem || '')
+        break
+      case 'asal':
+        cmp = (a.asal || '').localeCompare(b.asal || '')
+        break
+      case 'jumlah':
+        cmp = Number(a.jumlah) - Number(b.jumlah)
+        break
+      case 'status':
+        cmp = (a.bukti_url ? 1 : 0) - (b.bukti_url ? 1 : 0)
+        break
+    }
+    return sortConfig.asc ? cmp : -cmp
   })
 
   const totalTerupload = data.filter((b) => !!b.bukti_url).length
@@ -325,21 +361,81 @@ export default function BuktiNotaPage() {
               <thead>
                 <tr className="border-b bg-zinc-50/80">
                   <th className="px-6 py-2.5 text-left text-xs font-medium text-zinc-500">Bukti</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-zinc-500">Kode</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-zinc-500">Nama Item</th>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-zinc-500">Asal</th>
-                  <th className="px-4 py-2.5 text-right text-xs font-medium text-zinc-500">Jumlah</th>
-                  <th className="px-4 py-2.5 text-center text-xs font-medium text-zinc-500">Status</th>
+                  <th
+                    className="px-4 py-2.5 text-left text-xs font-medium text-zinc-500 cursor-pointer select-none hover:bg-zinc-100"
+                    onClick={() => toggleSort('kode')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Kode</span>
+                      {sortConfig.key === 'kode' ? (
+                        sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                      ) : (
+                        <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="px-4 py-2.5 text-left text-xs font-medium text-zinc-500 cursor-pointer select-none hover:bg-zinc-100"
+                    onClick={() => toggleSort('namaItem')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Nama Item</span>
+                      {sortConfig.key === 'namaItem' ? (
+                        sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                      ) : (
+                        <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="px-4 py-2.5 text-left text-xs font-medium text-zinc-500 cursor-pointer select-none hover:bg-zinc-100"
+                    onClick={() => toggleSort('asal')}
+                  >
+                    <div className="flex items-center gap-1">
+                      <span>Asal</span>
+                      {sortConfig.key === 'asal' ? (
+                        sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                      ) : (
+                        <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="px-4 py-2.5 text-right text-xs font-medium text-zinc-500 cursor-pointer select-none hover:bg-zinc-100"
+                    onClick={() => toggleSort('jumlah')}
+                  >
+                    <div className="flex items-center justify-end gap-1">
+                      <span>Jumlah</span>
+                      {sortConfig.key === 'jumlah' ? (
+                        sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                      ) : (
+                        <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="px-4 py-2.5 text-center text-xs font-medium text-zinc-500 cursor-pointer select-none hover:bg-zinc-100"
+                    onClick={() => toggleSort('status')}
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>Status</span>
+                      {sortConfig.key === 'status' ? (
+                        sortConfig.asc ? <ArrowUp className="size-3 text-teal-600" /> : <ArrowDown className="size-3 text-teal-600" />
+                      ) : (
+                        <ArrowUpDown className="size-3 text-zinc-400 opacity-60" />
+                      )}
+                    </div>
+                  </th>
                   <th className="px-6 py-2.5 text-center text-xs font-medium text-zinc-500">Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr><td colSpan={7} className="text-center py-8 text-sm text-zinc-400">Memuat data...</td></tr>
-                ) : filtered.length === 0 ? (
+                ) : sortedData.length === 0 ? (
                   <tr><td colSpan={7} className="text-center py-8 text-sm text-zinc-400">Tidak ada data</td></tr>
                 ) : (
-                  filtered.map((item, i) => (
+                  sortedData.map((item, i) => (
                     <tr key={item.id} className={`border-b transition-colors hover:bg-zinc-50/50 ${i % 2 === 1 ? 'bg-zinc-50/30' : ''}`}>
                       <td className="px-6 py-3">
                         {item.bukti_url ? (
@@ -430,6 +526,7 @@ export default function BuktiNotaPage() {
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Kode</label>
                   <input type="text" value={form.kode} onChange={(e) => setForm({ ...form, kode: e.target.value })} placeholder="A1, B1, C1..."
                     className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20" />
+                  <p className="mt-1 text-[11px] text-zinc-500">Item dalam nota yang sama menggunakan kode yang sama.</p>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Asal Transaksi</label>
