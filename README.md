@@ -10,34 +10,44 @@ Dashboard admin untuk mengelola Laporan Pertanggungjawaban (LPJ) Anggaran tim R-
 - Menu navigasi terkunci sampai periode dipilih
 
 ### Pemasukan
-- CRUD data pemasukan (kode, nama akun, satuan, qty, harga satuan)
+- CRUD data pemasukan (kode, nama akun, tanggal, satuan, qty, harga satuan)
 - Upload bukti nota langsung dari form tambah/edit
 - Jumlah otomatis (`qty × harga_satuan`)
+- Sorting tabel interaktif (Kode, Nama Akun, Satuan, Unit, Harga, Jumlah)
 
 ### Pengeluaran
 - Kelola kategori pengeluaran (Administrasi, Perlengkapan Robot, dll.)
-- CRUD item per kategori
-- Tabel report-style dengan border per baris dan total per kategori
-- Upload bukti nota per item
+- CRUD item per kategori lengkap dengan tanggal transaksi
+- **Satu Nota untuk Banyak Item**: Mendukung penggunaan kode yang sama untuk item-item yang berada dalam satu kuitansi/nota
+- **Saran Kode Otomatis**: Generator kode otomatis cerdas (`getNextKode`) berbasis prefix kategori dan nomor tertinggi yang sudah ada
+- **Sorting Tabel Interaktif**: Klik header kolom (AKUN, TANGGAL, SATUAN, UNIT, HARGA, JUMLAH, KODE) untuk pengurutan naik/turun
+- Tabel report-style dengan border per baris dan subtotal per kategori
+- Upload bukti nota per item dengan kompresi otomatis
 
 ### Bukti Nota
 - Halaman gabungan untuk semua transaksi (pemasukan + pengeluaran)
-- Upload bukti nota untuk transaksi yang belum punya bukti
+- Upload bukti nota untuk transaksi yang belum memiliki bukti
 - Preview gambar bukti full-size
 - Status tracking: Terupload / Menunggu
-- Search by kode atau nama
+- Filter dan pencarian (search) by kode atau nama transaksi
+- **Sorting Tabel Interaktif**: Urutkan daftar bukti nota berdasarkan Kode, Nama Item, Asal, Jumlah, atau Status
 
 ### Laporan
-- Preview laporan utama format Lampiran II KRSBI Humanoid
+- Preview laporan utama format resmi **Lampiran II KRSBI Humanoid**
 - Kop surat otomatis dari nama organisasi
-- Tabel pemasukan & pengeluaran per kategori
-- Lampiran bukti nota grid
-- **Export Excel** (3 sheet: Rekap, Pemasukan, Pengeluaran)
-- **Kunci laporan** (status Draft → Final)
+- Tabel A (Pemasukan) & Tabel B (Pengeluaran) lengkap dengan fitur sorting interaktif
+- **Lampiran Bukti Nota**:
+  - Pengelompokan nota dengan kode sama ke dalam satu kartu bukti nota terpadu (bebas error key duplikat)
+  - Fitur cetak/print lembar lampiran bukti nota siap cetak
+- **Export Excel Lengkap**:
+  - **Sheet 1 (`Laporan Realisasi`)**: Format laporan utuh dan berkelanjutan sesuai Lampiran II (Header organisasi, A. Pemasukan + Total, B. Seluruh Kategori Pengeluaran + Subtotal tiap kategori + Total Pengeluaran, serta Rekapitulasi Saldo Akhir)
+  - **Sheet 2 (`Pemasukan`)**: Rincian transaksi pemasukan
+  - **Sheet 3 (`Pengeluaran`)**: Rincian transaksi seluruh kategori pengeluaran
+- **Kunci Laporan**: Kunci status periode (Draft → Final) agar tidak dapat diedit kembali tanpa izin admin
 
 ### Riwayat
 - Lihat semua periode anggaran dari tahun ke tahun
-- Expand per tahun untuk lihat rincian pemasukan, pengeluaran, saldo, dan kategori
+- Expand per tahun untuk melihat rincian pemasukan, pengeluaran, saldo, dan kategori
 
 ### Upload Gambar
 - Kompresi otomatis sebelum upload (`browser-image-compression`, max 1MB, max 1200px)
@@ -86,7 +96,7 @@ kategori_pengeluaran
 pengeluaran
   ├── id (UUID)
   ├── kategori_id → kategori_pengeluaran.id
-  ├── kode, nama_item, satuan
+  ├── kode, nama_item, satuan, tanggal
   ├── qty, harga_satuan, jumlah
   └── bukti_url
 ```
@@ -133,10 +143,10 @@ app/
 │   ├── layout.tsx           # Dashboard layout + auth check
 │   ├── sidebar.tsx          # Sidebar navigasi
 │   ├── page.tsx             # Pilih periode + ringkasan
-│   ├── pemasukan/page.tsx   # CRUD pemasukan
-│   ├── pengeluaran/page.tsx # CRUD pengeluaran per kategori
-│   ├── bukti-nota/page.tsx  # Upload & kelola bukti nota
-│   ├── laporan/page.tsx     # Preview laporan + export Excel + kunci
+│   ├── pemasukan/page.tsx   # CRUD pemasukan + sorting
+│   ├── pengeluaran/page.tsx # CRUD pengeluaran per kategori + nota grouping + sorting
+│   ├── bukti-nota/page.tsx  # Upload & kelola bukti nota + sorting
+│   ├── laporan/page.tsx     # Preview laporan Lampiran II + export Excel multi-sheet + cetak bukti
 │   └── riwayat/page.tsx     # Riwayat semua periode
 ├── lib/supabase/
 │   ├── server.ts            # Supabase server client (cookies)
